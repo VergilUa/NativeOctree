@@ -308,6 +308,9 @@ namespace Octree
 		                             float3 direction,
 		                             float distance,
 		                             NativeList<QuadTreeHit<T>> results) {
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+			AtomicSafetyHandle.CheckReadAndThrow(m_Safety);
+#endif
 			direction = math.normalizesafe(direction);
 			float3 endPoint = origin + direction * distance;
 			
@@ -391,6 +394,9 @@ namespace Octree
 		/// Afterwards filters obtained hits by radius.
 		/// </summary>
 		public void SphereQuery(float3 pos, float radius, NativeList<OctElement<T>> results) {
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+			AtomicSafetyHandle.CheckReadAndThrow(m_Safety);
+#endif
 			pos.SphereToAABB(radius, out AABB bounds);
 			RangeQuery(bounds, results);
 

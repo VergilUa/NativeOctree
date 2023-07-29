@@ -71,4 +71,4 @@ crashlytics-build.properties
 
 
 # End of https://www.gitignore.io/api/unity
-/UserSettings/Layouts/default-2021.dwlt
+/UserSettings/*

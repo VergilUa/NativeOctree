@@ -1,5 +1,4 @@
 using System.Runtime.CompilerServices;
-using Unity.Burst;
 using Unity.Mathematics;
 using UnityEngine;
 
@@ -35,7 +34,6 @@ namespace Octree {
       /// Temporary sphere to AABB conversion
       /// </summary>
       [MethodImpl(MethodImplOptions.AggressiveInlining)]
-      [BurstCompile]
       public static void SphereToAABB(this in float3 pos, in float radius, out AABB result) {
          result = new AABB
                   {

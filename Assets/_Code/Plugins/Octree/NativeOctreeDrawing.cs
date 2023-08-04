@@ -16,7 +16,7 @@ namespace Octree {
          var widthAdd = bounds.Center.x + bounds.Extents.x;
          var heightAdd = bounds.Center.y + bounds.Extents.y;
 
-         UnsafeNativeOctree<T> data = tree.Data;
+         UnsafeOctree<T> data = tree.Data;
          
          for (int i = 0; i < data._nodes -> Capacity; i++) {
             var node = UnsafeUtility.ReadArrayElement<OctNode>(data._nodes -> Ptr, i);

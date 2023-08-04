@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
@@ -13,7 +14,8 @@ namespace Octree {
    // - Better test coverage
    // - Automated depth / max leaf elements calculation
    [BurstCompile]
-   public unsafe partial struct UnsafeNativeOctree<T> : IDisposable where T : unmanaged {
+   [StructLayout(LayoutKind.Sequential)]
+   public unsafe partial struct UnsafeOctree<T> : IDisposable where T : unmanaged {
       #region [Properties]
 
       public bool IsCreated => _elements != null;
@@ -65,11 +67,11 @@ namespace Octree {
       /// - Ensure the bounds are not way bigger than needed, otherwise the buckets are very off. Probably best to calculate bounds
       /// - The higher the depth, the larger the overhead, it especially goes up at a depth of 7/8
       /// </summary>
-      public UnsafeNativeOctree(Allocator allocator = Allocator.Temp,
-                                int maxDepth = 6,
-                                short maxLeafElements = 16,
-                                int initialElementsCapacity = 256,
-                                NativeArrayOptions options = NativeArrayOptions.ClearMemory) : this() {
+      public UnsafeOctree(Allocator allocator = Allocator.Temp,
+                          int maxDepth = 6,
+                          short maxLeafElements = 16,
+                          int initialElementsCapacity = 256,
+                          NativeArrayOptions options = NativeArrayOptions.ClearMemory) : this() {
          _allocator = allocator;
 
          _maxDepth = maxDepth;
@@ -96,20 +98,19 @@ namespace Octree {
       }
 
       /// <summary>
-      /// Creates a new instance of UnsafeNativeOctree with specified parameters as a memory block / pointer / reference
+      /// Creates a new instance of UnsafeOctree with specified parameters as a memory block / pointer / reference
       /// </summary>
-      public static UnsafeNativeOctree<T>* Create(Allocator allocator,
-                                                  int maxDepth,
-                                                  short maxLeafElements,
-                                                  int initialElementCapacity) {
-	      var octreeDataPtr =
-		      (UnsafeNativeOctree<T>*) UnsafeUtility.MallocTracked(UnsafeUtility.SizeOf<UnsafeNativeOctree<T>>(),
-		                                                           UnsafeUtility.AlignOf<UnsafeNativeOctree<T>>(),
-		                                                           allocator,
-		                                                           1);
+      public static UnsafeOctree<T>* Create(Allocator allocator,
+                                            int maxDepth,
+                                            short maxLeafElements,
+                                            int initialElementCapacity) {
+         var dataPtr = (UnsafeOctree<T>*) UnsafeUtility.MallocTracked(UnsafeUtility.SizeOf<UnsafeOctree<T>>(),
+                                                                      UnsafeUtility.AlignOf<UnsafeOctree<T>>(),
+                                                                      allocator,
+                                                                      1);
 
-         *octreeDataPtr = new UnsafeNativeOctree<T>(allocator, maxDepth, maxLeafElements, initialElementCapacity);
-         return octreeDataPtr;
+         *dataPtr = new UnsafeOctree<T>(allocator, maxDepth, maxLeafElements, initialElementCapacity);
+         return dataPtr;
       }
 
       [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -194,7 +195,7 @@ namespace Octree {
          // Add elements to leaf nodes
          int totalElementCount = incomingElements.Length;
          OctNode* nodesPtr = _nodes -> Ptr;
-         
+
          for (int i = 0; i < totalElementCount; i++) {
             addr = 0;
 
@@ -281,8 +282,8 @@ namespace Octree {
 
       [MethodImpl(MethodImplOptions.AggressiveInlining)]
       public void RangeQuery(AABB bounds, NativeList<OctElement<T>> results) =>
-	      new OctreeRangeQuery<T>().Query(this, bounds, results);
-      
+         new OctreeRangeQuery<T>().Query(this, bounds, results);
+
       /// <summary>
       /// Performs a raycast into the tree by building an AABB and raycasting at each hit by bounds
       /// </summary>
@@ -295,94 +296,94 @@ namespace Octree {
                                    float distance,
                                    NativeList<QuadTreeHit<T>> results) {
          direction = math.normalizesafe(direction);
-			float3 endPoint = origin + direction * distance;
-			
-			// TODO should the AABB optimized & split into segments?
-			AABB aabb = new AABB
-			            {
-				            Center = origin,
-				            Extents = new float3(ExtraQueryBoundsExpansion,
-				                                 ExtraQueryBoundsExpansion,
-				                                 ExtraQueryBoundsExpansion) 
-			            };
-			
-			aabb.Encapsulate(endPoint);
+         float3 endPoint = origin + direction * distance;
 
-			NativeList<OctElement<T>> aabbResults = new NativeList<OctElement<T>>(results.Length, Allocator.Temp);
-			RangeQuery(aabb, aabbResults);
+         // TODO should the AABB optimized & split into segments?
+         AABB aabb = new AABB
+                     {
+                        Center = origin,
+                        Extents = new float3(ExtraQueryBoundsExpansion,
+                                             ExtraQueryBoundsExpansion,
+                                             ExtraQueryBoundsExpansion)
+                     };
 
-			float3 hitNormal = -direction;
+         aabb.Encapsulate(endPoint);
 
-			for (int i = aabbResults.Length - 1; i >= 0; i--) {
-				OctElement<T> hit = aabbResults[i];
+         NativeList<OctElement<T>> aabbResults = new NativeList<OctElement<T>>(results.Length, Allocator.Temp);
+         RangeQuery(aabb, aabbResults);
 
-				float3 toCenter = hit.Pos - origin;
-				float distSqr = math.lengthsq(toCenter);
+         float3 hitNormal = -direction;
 
-				float radiusSqr = hit.Radius;
-				radiusSqr *= radiusSqr;
+         for (int i = aabbResults.Length - 1; i >= 0; i--) {
+            OctElement<T> hit = aabbResults[i];
 
-				// Ray inside sphere -> Valid hit
-				if (distSqr < radiusSqr) {
-					results.Add(new QuadTreeHit<T>
-					            {
-						            Value = hit.Value,
-						            HitPoint = origin,
-						            HitNormal = hitNormal
-						            //Distance = 0
-					            });
-					continue;
-				}
+            float3 toCenter = hit.Pos - origin;
+            float distSqr = math.lengthsq(toCenter);
 
-				// Project vector pointing from origin of the ray to the sphere onto the direction of the ray
-				float projectedDist = math.dot(toCenter, direction);
-				
-				// Construct the sides of a triangle using the radius of the circle at
-				// the projected point from the last step. The sides of this
-				// triangle are radius, b and f, in squared units
-				float bSqr = distSqr - projectedDist * projectedDist;
-				
-				// No collision
-				if (radiusSqr - bSqr < 0f) continue;
-				
-				float f = math.sqrt(radiusSqr - bSqr);
-				float hitDistance = projectedDist - f;
-				
-				// No collision
-				if (hitDistance < 0) continue;
-				
-				results.Add(new QuadTreeHit<T>
-				            {
-					            Value = hit.Value,
-					            HitPoint = origin + hitDistance * direction,
-					            HitNormal = hitNormal,
-					            Distance = hitDistance
-				            });
-			}
+            float radiusSqr = hit.Radius;
+            radiusSqr *= radiusSqr;
+
+            // Ray inside sphere -> Valid hit
+            if (distSqr < radiusSqr) {
+               results.Add(new QuadTreeHit<T>
+                           {
+                              Value = hit.Value,
+                              HitPoint = origin,
+                              HitNormal = hitNormal
+                              //Distance = 0
+                           });
+               continue;
+            }
+
+            // Project vector pointing from origin of the ray to the sphere onto the direction of the ray
+            float projectedDist = math.dot(toCenter, direction);
+
+            // Construct the sides of a triangle using the radius of the circle at
+            // the projected point from the last step. The sides of this
+            // triangle are radius, b and f, in squared units
+            float bSqr = distSqr - projectedDist * projectedDist;
+
+            // No collision
+            if (radiusSqr - bSqr < 0f) continue;
+
+            float f = math.sqrt(radiusSqr - bSqr);
+            float hitDistance = projectedDist - f;
+
+            // No collision
+            if (hitDistance < 0) continue;
+
+            results.Add(new QuadTreeHit<T>
+                        {
+                           Value = hit.Value,
+                           HitPoint = origin + hitDistance * direction,
+                           HitNormal = hitNormal,
+                           Distance = hitDistance
+                        });
+         }
       }
-      
+
       /// <summary>
       /// Converts position and radius to AABB, then performs RangeQuery on it.
       /// Afterwards filters obtained hits by radius.
       /// </summary>
       [MethodImpl(MethodImplOptions.AggressiveInlining)]
       public void SphereQuery(float3 pos, float radius, NativeList<OctElement<T>> results) {
-	      pos.SphereToAABB(radius, out AABB bounds);
-	      RangeQuery(bounds, results);
+         pos.SphereToAABB(radius, out AABB bounds);
+         RangeQuery(bounds, results);
 
-	      for (int i = results.Length - 1; i >= 0; i--) {
-		      OctElement<T> hit = results[i];
+         for (int i = results.Length - 1; i >= 0; i--) {
+            OctElement<T> hit = results[i];
 
-		      float sqrRadius = hit.Radius + radius;
-		      sqrRadius *= sqrRadius;
+            float sqrRadius = hit.Radius + radius;
+            sqrRadius *= sqrRadius;
 
-		      // Not hit actually (corner case)
-		      // Remove from obtained hits
-		      float sqrDist = math.distancesq(pos, hit.Pos);
-		      if (sqrDist > sqrRadius) {
-			      results.RemoveAt(i);
-		      }
-	      }
+            // Not hit actually (corner case)
+            // Remove from obtained hits
+            float sqrDist = math.distancesq(pos, hit.Pos);
+            if (sqrDist > sqrRadius) {
+               results.RemoveAt(i);
+            }
+         }
       }
 
       #endregion

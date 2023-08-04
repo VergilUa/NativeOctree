@@ -7,14 +7,14 @@ using static Unity.Mathematics.math;
 
 namespace Octree {
    public unsafe partial struct OctreeRangeQuery<T> where T : unmanaged {
-      private UnsafeNativeOctree<T> _tree;
+      private UnsafeOctree<T> _tree;
 
       private UnsafeList<OctElement<T>>* _fastResults;
       private int _count;
 
       private AABB _bounds;
 
-      public void Query(UnsafeNativeOctree<T> tree, AABB bounds, NativeList<OctElement<T>> results) {
+      public void Query(UnsafeOctree<T> tree, AABB bounds, NativeList<OctElement<T>> results) {
          _tree = tree;
          _bounds = bounds;
 

@@ -1,5 +1,5 @@
 namespace Octree {
-   internal struct OctNode {
+   public struct OctNode {
       // Points to this node's first child index in elements
       public int FirstChildIndex;
 

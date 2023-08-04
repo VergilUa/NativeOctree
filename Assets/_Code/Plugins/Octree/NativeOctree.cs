@@ -1,9 +1,6 @@
 ﻿using System;
-using System.Collections.Generic;
-using Unity.Burst;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
-using Unity.Jobs;
 using Unity.Mathematics;
 
 namespace Octree
@@ -16,10 +13,14 @@ namespace Octree
 	/// but includes job / thread safety checks for usage in jobs outside of Entities scope.
 	/// </remarks>
 	[NativeContainer]
-	public unsafe partial struct NativeOctree<T> : INativeDisposable where T : unmanaged {
+	public unsafe partial struct NativeOctree<T> : IDisposable where T : unmanaged {
 		#region [Properties]
 
 		public bool IsCreated => _octreeData != null && _octreeData -> IsCreated;
+
+		public AABB Bounds => _octreeData -> Bounds;
+
+		public UnsafeNativeOctree<T> Data => *_octreeData;
 
 		#endregion
 		
@@ -39,10 +40,10 @@ namespace Octree
 		internal static readonly int s_staticSafetyId = AtomicSafetyHandle.NewStaticSafetyId<NativeOctree<T>>();
 #endif
 
-		[NativeDisableParallelForRestriction]
+		[NativeDisableUnsafePtrRestriction]
 		internal UnsafeNativeOctree<T>* _octreeData;
 
-		private Allocator _allocator;
+		private readonly Allocator _allocator;
 		
 		#endregion
 
@@ -87,11 +88,8 @@ namespace Octree
 		}
 
 		/// <summary>
-		/// Performs a raycast into the tree by building an AABB and raycasting at each hit by bounds
+		/// <inheritdoc cref="UnsafeNativeOctree{T}"/>
 		/// </summary>
-		/// <remarks>
-		/// Returned results are not sorted by distance
-		/// </remarks>
 		public void RaycastNonSorted(float3 origin,
 		                             float3 direction,
 		                             float distance,
@@ -99,71 +97,7 @@ namespace Octree
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
 			AtomicSafetyHandle.CheckReadAndThrow(m_Safety);
 #endif
-			direction = math.normalizesafe(direction);
-			float3 endPoint = origin + direction * distance;
-			
-			// TODO should the AABB optimized & split into segments?
-			AABB aabb = new AABB
-			            {
-				            Center = origin,
-				            Extents = new float3(ExtraQueryBoundsExpansion,
-				                                 ExtraQueryBoundsExpansion,
-				                                 ExtraQueryBoundsExpansion) 
-			            };
-			
-			aabb.Encapsulate(endPoint);
-
-			NativeList<OctElement<T>> aabbResults = new NativeList<OctElement<T>>(results.Length, Allocator.Temp);
-			RangeQuery(aabb, aabbResults);
-
-			float3 hitNormal = -direction;
-
-			for (int i = aabbResults.Length - 1; i >= 0; i--) {
-				OctElement<T> hit = aabbResults[i];
-
-				float3 toCenter = hit.Pos - origin;
-				float distSqr = math.lengthsq(toCenter);
-
-				float radiusSqr = hit.Radius;
-				radiusSqr *= radiusSqr;
-
-				// Ray inside sphere -> Valid hit
-				if (distSqr < radiusSqr) {
-					results.Add(new QuadTreeHit<T>
-					            {
-						            Value = hit.Value,
-						            HitPoint = origin,
-						            HitNormal = hitNormal
-						            //Distance = 0
-					            });
-					continue;
-				}
-
-				// Project vector pointing from origin of the ray to the sphere onto the direction of the ray
-				float projectedDist = math.dot(toCenter, direction);
-				
-				// Construct the sides of a triangle using the radius of the circle at
-				// the projected point from the last step. The sides of this
-				// triangle are radius, b and f, in squared units
-				float bSqr = distSqr - projectedDist * projectedDist;
-				
-				// No collision
-				if (radiusSqr - bSqr < 0f) continue;
-				
-				float f = math.sqrt(radiusSqr - bSqr);
-				float hitDistance = projectedDist - f;
-				
-				// No collision
-				if (hitDistance < 0) continue;
-				
-				results.Add(new QuadTreeHit<T>
-				            {
-					            Value = hit.Value,
-					            HitPoint = origin + hitDistance * direction,
-					            HitNormal = hitNormal,
-					            Distance = hitDistance
-				            });
-			}
+			_octreeData -> RaycastNonSorted(origin, direction, distance, results);
 		}
 
 		/// <summary>
@@ -178,37 +112,20 @@ namespace Octree
 		}
 		
 		/// <summary>
-		/// Converts position and radius to AABB, then performs RangeQuery on it.
-		/// Afterwards filters obtained hits by radius.
+		/// <inheritdoc cref="UnsafeNativeOctree{T}"/>>
 		/// </summary>
 		public void SphereQuery(float3 pos, float radius, NativeList<OctElement<T>> results) {
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
 			AtomicSafetyHandle.CheckReadAndThrow(m_Safety);
 #endif
-			pos.SphereToAABB(radius, out AABB bounds);
-			RangeQuery(bounds, results);
-
-			for (int i = results.Length - 1; i >= 0; i--) {
-				OctElement<T> hit = results[i];
-
-				float sqrRadius = hit.Radius + radius;
-				sqrRadius *= sqrRadius;
-
-				// Not hit actually (corner case)
-				// Remove from obtained hits
-				float sqrDist = math.distancesq(pos, hit.Pos);
-				if (sqrDist > sqrRadius) {
-					results.RemoveAt(i);
-				}
-			}
+			_octreeData->SphereQuery(pos, radius, results);
 		}
 
-		public void RangeQuery(AABB bounds, NativeList<OctElement<T>> results)
-		{
+		public void RangeQuery(AABB bounds, NativeList<OctElement<T>> results) {
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
 			AtomicSafetyHandle.CheckReadAndThrow(m_Safety);
 #endif
-			new OctreeRangeQuery().Query(this, bounds, results);
+			_octreeData -> RangeQuery(bounds, results);
 		}
 
 		public void Clear()
@@ -221,16 +138,13 @@ namespace Octree
 
 		public void Dispose() {
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
-			if (!AtomicSafetyHandle.IsDefaultValue(m_Safety))
-			{
+			if (!AtomicSafetyHandle.IsDefaultValue(m_Safety)) {
 				AtomicSafetyHandle.CheckExistsAndThrow(m_Safety);
 			}
 #endif
-			if (!IsCreated)
-			{
+			if (!IsCreated) 
 				return;
-			}
-			
+
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
 			CollectionHelper.DisposeSafetyHandle(ref m_Safety);
 #endif
@@ -238,34 +152,6 @@ namespace Octree
 			UnsafeUtility.FreeTracked(_octreeData, _allocator);
 
 			_octreeData = null;
-		}
-
-		// TODO 
-		public JobHandle Dispose(JobHandle inputDeps) {
-#if ENABLE_UNITY_COLLECTIONS_CHECKS
-			if (!AtomicSafetyHandle.IsDefaultValue(m_Safety)) {
-				AtomicSafetyHandle.CheckExistsAndThrow(m_Safety);
-			}
-#endif
-			if (!IsCreated) 
-				return inputDeps;
-
-#if ENABLE_UNITY_COLLECTIONS_CHECKS
-			var jobHandle = new OctreeDisposeJob<T>
-			                {
-				                Data = new OctreeDispose<T>
-				                       {_octreeData = _octreeData, m_Safety = m_Safety}
-			                }.Schedule(inputDeps);
-			AtomicSafetyHandle.Release(m_Safety);
-#else
-			var jobHandle = new OctreeDisposeJob<T>
-			                {
-				                Data = new OctreeDispose<T> {_octreeData = _octreeData}
-			                }.Schedule(inputDeps);
-																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																																	                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                (UntypedUnsafeList*)m_ListData } }.Schedule(inputDeps);
-#endif
-			_octreeData = null;
-			return jobHandle;
 		}
 	}
 }

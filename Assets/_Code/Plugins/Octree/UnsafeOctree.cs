@@ -349,8 +349,8 @@ namespace Octree {
             float f = math.sqrt(radiusSqr - bSqr);
             float hitDistance = projectedDist - f;
 
-            // No collision
-            if (hitDistance < 0) continue;
+            // No collision or too far
+            if (hitDistance < 0 || hitDistance > distance) continue;
 
             results.Add(new QuadTreeHit<T>
                         {
